@@ -14,6 +14,8 @@ const LABELS = {
   duplicate: ["Duplicate", ""],
 };
 const CAMPAIGN = { draft: "Not started", running: "Running", paused: "Paused", done: "Finished" };
+const ONGOING = { draft: "Off", running: "On", paused: "Off", done: "Off" };
+const stateLabel = (c) => (c.kind === "ongoing" ? ONGOING : CAMPAIGN)[c.status] || c.status;
 const FILTERS = [["", "All"], ["todo", "To send"], ["sent", "Sent"], ["problem", "Problems"], ["skipped", "Skipped"]];
 
 function put(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); }
@@ -143,15 +145,28 @@ function campaignForm() {
     first_name_only: h("input", { type: "checkbox" }),
     allow_repeat: h("input", { type: "checkbox" }),
   };
+  const fixed = h("input", { type: "radio", name: "kind", value: "fixed", checked: true });
+  const ongoing = h("input", { type: "radio", name: "kind", value: "ongoing" });
+  const csvLabel = h("label", {}, "Recipients (paste CSV)");
+  const submit = h("button", { class: "primary" }, "Create and check");
+  const kindChanged = () => {
+    f.csv.required = fixed.checked;
+    csvLabel.textContent = fixed.checked ? "Recipients (paste CSV)" : "Recipients (optional — add them as they come)";
+  };
+  fixed.addEventListener("change", kindChanged); ongoing.addEventListener("change", kindChanged);
   return h("form", { class: "card", onsubmit: async (e) => {
     e.preventDefault();
-    const body = {};
+    const body = { kind: ongoing.checked ? "ongoing" : "fixed" };
     for (const [k, el] of Object.entries(f)) body[k] = el.type === "checkbox" ? el.checked : el.value;
     try { const r = await api("/campaigns", body); after(r); location.hash = "#/c/" + r.id; } catch (err) { fail(err); }
   } },
     h("h2", {}, "New campaign"),
     field("Name of the campaign", f.name),
-    field("Recipients (paste CSV)", f.csv, "A name and a phone number per row. Comma, semicolon or tab; a header row is optional. Other columns become placeholders, e.g. [town]."),
+    h("label", {}, "Type"),
+    h("div", { class: "kinds" },
+      h("label", { class: "kind" }, fixed, h("span", {}, h("strong", {}, "Fixed"), h("span", { class: "muted small" }, "A list you send through once. Finishes when everyone has been texted."))),
+      h("label", { class: "kind" }, ongoing, h("span", {}, h("strong", {}, "Ongoing"), h("span", { class: "muted small" }, "Stays on until you turn it off. Whoever you add is texted automatically.")))),
+    h("div", {}, csvLabel, f.csv, h("div", { class: "muted small" }, "A name and a phone number per row. Comma, semicolon or tab; a header row is optional. Other columns become placeholders, e.g. [town].")),
     field("Message", f.template, "[name] is replaced for each recipient."),
     counter(f.template),
     h("div", { class: "row" },
@@ -163,8 +178,8 @@ function campaignForm() {
       field("Start at (optional)", f.start_at)),
     h("label", { class: "check" }, f.first_name_only, "Use only the first name for [name]"),
     h("label", { class: "check" }, f.allow_repeat, "Allow numbers I have texted before"),
-    h("div", { class: "actions" }, h("button", { class: "primary" }, "Create and check"),
-      h("span", { class: "muted small" }, "Nothing is sent until you press Start.")),
+    h("div", { class: "actions" }, submit,
+      h("span", { class: "muted small" }, "Nothing is sent until you start it or turn it on.")),
     h("p", { class: "muted small" }, "A round sends that many messages back to back, then waits the delay."));
 }
 
@@ -174,7 +189,8 @@ async function showList() {
     const n = c.counts, total = Object.values(n).reduce((a, b) => a + b, 0);
     return h("li", {},
       h("a", { class: "grow", href: "#/c/" + c.id }, c.name),
-      h("span", { class: "badge " + (c.status === "running" ? "ok" : "") }, CAMPAIGN[c.status] || c.status),
+      c.kind === "ongoing" ? h("span", { class: "badge" }, "Ongoing") : null,
+      h("span", { class: "badge " + (c.status === "running" ? "ok" : "") }, stateLabel(c)),
       h("span", { class: "muted small" }, (n.sent || 0) + " sent of " + total + (n.dry ? " (" + n.dry + " rehearsed)" : "")));
   });
   put(main, 
@@ -251,6 +267,8 @@ function buildCampaign(d) {
     h("div", { class: "card" }, h("h2", {}, "Recipients"), e.tabs, e.table, e.pager),
     h("form", { class: "card", onsubmit: async (ev) => {
       ev.preventDefault();
+      // An ongoing campaign that is on sends without a Start press, so this is the last question.
+      if (view.live && !confirm("This campaign is on: the people you add are texted right away. Add them?")) return;
       try { after(await api("/campaigns/" + view.id + "/add", { csv: more.value })); more.value = ""; await refreshCampaign(); } catch (err) { fail(err); }
     } }, h("h2", {}, "Add more recipients"), more, h("div", { class: "actions" }, h("button", {}, "Add and check"))),
     h("div", { class: "card" }, h("h2", {}, "Log"), e.log));
@@ -266,7 +284,8 @@ function renderLive(d) {
   const eta = left && c.status === "running" ? "about " + Math.ceil(Math.ceil(left / Math.max(1, c.batch)) * c.delay / 60) + " min left" : "";
   const next = d.next_at && c.status === "running" ? "next in " + Math.max(0, Math.round(d.next_at - Date.now() / 1000)) + " s" : "";
   put(e.status, 
-    h("span", { class: "badge " + (c.status === "running" ? "ok" : c.status === "paused" ? "warn" : "") }, CAMPAIGN[c.status] || c.status),
+    c.kind === "ongoing" ? h("span", { class: "badge" }, "Ongoing") : null,
+    h("span", { class: "badge " + (c.status === "running" ? "ok" : c.status === "paused" ? "warn" : "") }, stateLabel(c)),
     h("strong", {}, sent + (n.dry ? " rehearsed, " : " sent, ") + left + " to go"),
     h("span", { class: "muted small" }, [c.note, eta, next].filter(Boolean).join(" · ")));
   e.bar.max = Math.max(1, sent + left); e.bar.value = sent;
@@ -274,12 +293,17 @@ function renderLive(d) {
   put(e.chips, ...Object.keys(LABELS).filter((s) => n[s]).map((s) =>
     h("span", { class: "badge " + LABELS[s][1] }, statusLabel(s) + ": " + n[s])));
 
-  const startLabel = c.status === "draft" ? "Start" : "Resume";
+  const on = c.kind === "ongoing";
+  view.live = on && d.running && !state.dry_run;
+  const startLabel = on ? "Turn on" : c.status === "draft" ? "Start" : "Resume";
+  const ask = state.dry_run ? null : on
+    ? "Turn this campaign on? " + (n.ready || 0) + " real SMS go out now, and everyone you add later is texted automatically until you turn it off."
+    : "Send " + (n.ready || 0) + " real SMS from this phone?";
   put(e.controls, 
     d.running
-      ? h("button", { class: "primary", type: "button", onclick: () => act(base + "/pause") }, "Pause")
-      : h("button", { class: "primary", type: "button", disabled: !n.ready && !n.unchecked,
-          onclick: () => act(base + "/start", {}, state.dry_run ? null : "Send " + (n.ready || 0) + " real SMS from this phone?") }, startLabel),
+      ? h("button", { class: "primary", type: "button", onclick: () => act(base + "/pause") }, on ? "Turn off" : "Pause")
+      : h("button", { class: "primary", type: "button", disabled: !on && !n.ready && !n.unchecked,
+          onclick: () => act(base + "/start", {}, ask) }, startLabel),
     h("button", { type: "button", onclick: () => act(base + "/check") }, "Check numbers again"),
     n.failed ? h("button", { type: "button", onclick: () => act(base + "/retry-failed") }, "Retry the failed") : null,
     d.running ? null : h("button", { class: "danger", type: "button", onclick: async () => {

@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import config as configuration
 from . import csvin, lookup, template
 from .phone import to_e164
-from .sender import Busy, Sender
+from .sender import Sender
 from .store import Store
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -96,7 +96,7 @@ class App:
             else {"name": "Anna"}
         text = template.render(c["template"], vals)
         chars, parts, encoding = template.segments(text)
-        running = self.sender.running_id() == cid
+        running = c["status"] == "running"
         return {
             "campaign": c,
             "dry_run": bool(self.cfg["dry_run"]),
@@ -107,7 +107,7 @@ class App:
             "page_size": PAGE,
             "events": self.store.events(cid),
             "running": running,
-            "next_at": self.sender.next_at if running else None,
+            "next_at": self.sender.next_at(cid) if running else None,
             "preview": {"text": text, "chars": chars, "parts": parts, "encoding": encoding,
                         "to": sample["name"] if sample else ""},
             "unknown_placeholders": template.unknown_keys(c["template"], self.store.known_keys(cid)),
@@ -269,8 +269,6 @@ class Handler(BaseHTTPRequestHandler):
             self._api(method, url.path[4:], query, body)
         except ApiError as error:
             self._send(error.status, {"error": error.message})
-        except Busy:
-            self._send(409, {"error": "Another campaign is running. Pause it first."})
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as error:  # noqa: BLE001 — the page must get an answer
@@ -314,15 +312,16 @@ class Handler(BaseHTTPRequestHandler):
                 "defaults": {"delay": cfg["default_delay"], "jitter": cfg["default_jitter"],
                              "batch": cfg["default_batch"],
                              "window_start": cfg["window_start"], "window_end": cfg["window_end"]},
-                "running_id": app.sender.running_id(),
                 "campaigns": store.campaigns(),
             })
             return
 
         if path == "/campaigns" and method == "POST":
             data = app.campaign_input(body)
+            data["kind"] = "ongoing" if body.get("kind") == "ongoing" else "fixed"
             parsed = csvin.parse(str(body.get("csv", "")), cfg["country_code"])
-            if not parsed:
+            # An ongoing campaign may start empty: people are added as they come.
+            if not parsed and data["kind"] == "fixed":
                 raise ApiError(422, "Paste at least one row with a phone number.")
             cid = store.create_campaign(data)
             store.add_recipients(cid, parsed)
@@ -337,7 +336,7 @@ class Handler(BaseHTTPRequestHandler):
             c = store.campaign(cid)
             if c is None:
                 raise ApiError(404, "No such campaign.")
-            running = app.sender.running_id() == cid
+            running = c["status"] == "running"
             if method == "GET" and action is None:
                 try:
                     page = max(0, int(query.get("page", 0)))
@@ -368,15 +367,13 @@ class Handler(BaseHTTPRequestHandler):
             elif action == "start":
                 if running:
                     raise ApiError(409, "Already running.")
-                if app.sender.running_id() is not None:
-                    raise Busy()
                 # Never start on an old answer: ask again, and refuse if nobody answers.
                 app.check(cid, must=True)
-                if not store.has_ready(cid):
+                if c["kind"] == "fixed" and not store.has_ready(cid):
                     raise ApiError(422, "Nobody is ready to be sent to.")
                 app.sender.start(cid)
             elif action == "pause":
-                app.sender.pause(cid, "Paused by you.")
+                app.sender.pause(cid, "Stopped by you." if c["kind"] == "ongoing" else "Paused by you.")
             elif action == "retry-failed":
                 store.retry_failed(cid)
                 problem = app.check(cid)
@@ -475,7 +472,4 @@ def serve(cfg):
     except KeyboardInterrupt:
         pass
     finally:
-        running = app.sender.running_id()
-        if running:
-            app.sender.pause(running, "Paused: the app was stopped.")
-            app.sender.join(5)
+        app.sender.shutdown("Paused: the app was stopped.")

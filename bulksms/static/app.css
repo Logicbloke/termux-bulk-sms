@@ -39,6 +39,11 @@ textarea.mono { font-family: ui-monospace, monospace; font-size: 14px; }
   .row.times { grid-template-columns: 1fr 1fr; }
   .row.times > :last-child { grid-column: 1 / -1; }
 }
+.kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.kind { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-weight: 400; font-size: 16px; cursor: pointer; }
+.kind:has(input:checked) { border-color: var(--accent); }
+.kind input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.kind span span { display: block; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
 button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); cursor: pointer; }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }

@@ -1,5 +1,6 @@
 import datetime
 import os
+import time
 import tempfile
 import unittest
 
@@ -40,15 +41,29 @@ class SendingTest(unittest.TestCase):
         def default(phone, text):
             self.sent.append((phone, text))
             return "sent", ""
+        # Time is the test's own: sleeping moves the clock, nothing really waits.
+        self.clock = 0.0
+
+        def sleep(seconds):
+            self.clock += seconds
+            self.naps.append(seconds)
+            time.sleep(0.0005)
+        self.naps = []
         return Sender(self.store, {"max_consecutive_failures": 3}, send=send or default,
-                      sleep=lambda s: None, now=now, wake=lambda lock: None)
+                      sleep=sleep, now=now, wake=lambda lock: None, clock=lambda: self.clock)
 
     def run_to_end(self, cid, **kw):
         s = self.sender(**kw)
-        s._nap = lambda seconds, stop, cid=None: None
         s.start(cid)
         s.join(10)
+        self.assertFalse(s.thread.is_alive())
         return s
+
+    def until(self, condition):
+        deadline = time.monotonic() + 5
+        while not condition():
+            self.assertLess(time.monotonic(), deadline, "timed out")
+            time.sleep(0.002)
 
     def test_nothing_is_ready_before_the_lookup_has_answered(self):
         cid = self.campaign([("Anna", "0701234567")])
@@ -112,12 +127,58 @@ class SendingTest(unittest.TestCase):
         cid = self.campaign([(str(i), f"070000000{i}") for i in range(1, 8)], batch=3)
         self.answer(cid)
         trace = []
-        s = self.sender(send=lambda phone, text: (trace.append("sms"), ("sent", ""))[1])
-        s._nap = lambda seconds, stop, cid=None: trace.append("wait")
+        s = self.sender(send=lambda phone, text: (trace.append(self.clock), ("sent", ""))[1])
         s.start(cid)
         s.join(10)
-        self.assertEqual(trace, ["sms"] * 3 + ["wait"] + ["sms"] * 3 + ["wait"] + ["sms"])
+        # delay 1 s, no jitter: three at once, a second later three more, then the last.
+        self.assertEqual(trace, [0.0] * 3 + [1.0] * 3 + [2.0])
         self.assertEqual(self.store.campaign(cid)["status"], "done")
+
+    def test_an_ongoing_campaign_stays_on_and_sends_to_whoever_is_added(self):
+        cid = self.campaign([("Anna", "0700000001")], kind="ongoing")
+        self.answer(cid)
+        s = self.sender()
+        s.start(cid)
+        self.until(lambda: len(self.sent) == 1)
+        self.until(lambda: self.store.campaign(cid)["note"].startswith("On: waiting"))
+        self.assertEqual(self.store.campaign(cid)["status"], "running")
+        self.store.add_recipients(cid, [{"name": "Bo", "phone_raw": "0700000002", "fields": {}},
+                                        {"name": "Anna igen", "phone_raw": "0700000001", "fields": {}}])
+        self.answer(cid)
+        self.until(lambda: len(self.sent) == 2)
+        self.assertEqual(self.sent[1], ("+46700000002", "Hej Bo!"))
+        self.assertEqual(self.statuses(cid), ["sent", "sent", "duplicate"])
+        self.assertEqual(self.store.campaign(cid)["status"], "running")
+        s.pause(cid, "Stopped by you.")
+        s.join(5)
+        self.assertFalse(s.thread.is_alive())
+        self.store.add_recipients(cid, [{"name": "Cia", "phone_raw": "0700000003", "fields": {}}])
+        self.answer(cid)
+        time.sleep(0.05)
+        self.assertEqual(len(self.sent), 2, "a stopped campaign sends to nobody")
+
+    def test_an_ongoing_campaign_may_be_turned_on_empty(self):
+        cid = self.campaign([], kind="ongoing")
+        s = self.sender()
+        s.start(cid)
+        self.until(lambda: self.store.campaign(cid)["note"].startswith("On: waiting"))
+        self.store.add_recipients(cid, [{"name": "Dan", "phone_raw": "0700000004", "fields": {}}])
+        self.answer(cid)
+        self.until(lambda: len(self.sent) == 1)
+        s.shutdown("Paused: the app was stopped.")
+        self.assertEqual(self.store.campaign(cid)["status"], "paused")
+
+    def test_two_campaigns_can_be_on_at_once(self):
+        ongoing = self.campaign([], kind="ongoing")
+        fixed = self.campaign([("A", "0700000001"), ("B", "0700000002")])
+        self.answer(fixed)
+        s = self.sender()
+        s.start(ongoing)
+        s.start(fixed)
+        self.until(lambda: self.store.campaign(fixed)["status"] == "done")
+        self.assertEqual(len(self.sent), 2)
+        self.assertEqual(self.store.campaign(ongoing)["status"], "running")
+        s.shutdown("stop")
 
     def test_a_dry_run_leaves_no_history(self):
         cid = self.campaign([("Anna", "0700000001")])

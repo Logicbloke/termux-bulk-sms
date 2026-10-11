@@ -1,4 +1,4 @@
-"""The one worker that sends: one campaign at a time, one message at a time."""
+"""The one worker that sends: any number of campaigns, one message at a time."""
 
 import datetime
 import json
@@ -8,10 +8,6 @@ import threading
 import time
 
 from . import template
-
-
-class Busy(Exception):
-    pass
 
 
 def termux_send(cfg):
@@ -49,121 +45,153 @@ def _wake(lock):
 
 
 class Sender:
-    def __init__(self, store, cfg, send=None, sleep=time.sleep, now=datetime.datetime.now, wake=_wake):
+    """One thread serves every campaign that is switched on.
+
+    A fixed campaign finishes when its queue is empty. An ongoing one stays on
+    and waits: whoever is added later is sent to, at the campaign's own pace.
+    """
+
+    IDLE = 0.5
+
+    def __init__(self, store, cfg, send=None, sleep=time.sleep, now=datetime.datetime.now,
+                 wake=_wake, clock=time.time):
         self.store, self.cfg = store, cfg
         self.send = send or termux_send(cfg)
-        self.sleep, self.now, self.wake = sleep, now, wake
+        self.sleep, self.now, self.wake, self.clock = sleep, now, wake, clock
         self.lock = threading.Lock()
         self.thread = None
-        self.stop = threading.Event()
-        self.campaign_id = None
-        self.next_at = None
-
-    def running_id(self):
-        return self.campaign_id if self.thread and self.thread.is_alive() else None
+        self.alive = False
+        self.quit = False
+        self.pauses = {}     # campaign id -> (since, seconds): the delay after a round
+        self.in_round = {}   # campaign id -> messages sent in the current round
+        self.failures = {}   # campaign id -> failures in a row
 
     def start(self, cid):
         with self.lock:
-            if self.thread and self.thread.is_alive():
-                raise Busy()
-            self.stop = threading.Event()
-            self.campaign_id = cid
             self.store.set_status(cid, "running")
             self.store.event(cid, "Started." + (" DRY RUN: nothing is really sent." if self.cfg.get("dry_run") else ""))
-            self.thread = threading.Thread(target=self._run, args=(cid, self.stop), daemon=True)
-            self.thread.start()
+            for book in (self.pauses, self.in_round, self.failures):
+                book.pop(cid, None)
+            if not self.alive:
+                self.alive, self.quit = True, False
+                self.thread = threading.Thread(target=self._run, daemon=True)
+                self.thread.start()
 
     def pause(self, cid, note="Paused."):
-        if self.campaign_id == cid:
-            self.stop.set()
         c = self.store.campaign(cid)
         if c and c["status"] == "running":
             self.store.set_status(cid, "paused", note)
             self.store.event(cid, note)
 
+    def shutdown(self, note):
+        """The app is stopping: nothing may be left marked as running."""
+        for c in self.store.q("SELECT id FROM campaigns WHERE status='running'"):
+            self.pause(c["id"], note)
+        self.quit = True
+        self.join(5)
+
     def join(self, timeout=None):
         if self.thread:
             self.thread.join(timeout)
 
+    def next_at(self, cid):
+        """When this campaign sends next, if it is waiting out a delay."""
+        c = self.store.campaign(cid)
+        pause = self.pauses.get(cid)
+        if not c or not pause:
+            return None
+        return pause[0] + self._ceiling(c, pause[1])
+
     # -- the loop ----------------------------------------------------------
 
-    def _run(self, cid, stop):
+    def _run(self):
         self.wake(True)
-        failures = 0
-        in_round = 0
         try:
-            while not stop.is_set():
-                c = self.store.campaign(cid)
-                if c is None or c["status"] != "running":
-                    return
-                wait, why = self._hold(c)
-                if wait > 0:
-                    self.store.set_note(cid, why)
-                    self._nap(min(wait, 5), stop)
-                    continue
-                self.store.set_note(cid, "")
-                r = self.store.claim_next(cid)
-                if r is None:
-                    self.store.set_status(cid, "done")
-                    self.store.event(cid, "Finished: nobody left to send to.")
-                    return
-                vals = template.values(r["name"], json.loads(r["fields"]), c["first_name_only"])
-                text = template.render(c["template"], vals)
-                outcome, detail = self.send(r["phone"], text)
-                if outcome in ("sent", "dry"):
-                    # A rehearsal must not put anyone in the history: the real
-                    # run would then skip them all as "already texted".
-                    self.store.mark_sent(r, text, detail, log=outcome == "sent")
-                    failures = 0
-                elif outcome == "uncertain":
-                    self.store.mark(r["id"], "uncertain", detail)
-                    self.store.set_status(cid, "paused", "Paused: one message may or may not have been sent.")
-                    self.store.event(cid, f"Uncertain result for {r['phone']}; paused.")
-                    return
-                else:
-                    self.store.mark(r["id"], "failed", detail)
-                    self.store.event(cid, f"Failed for {r['phone']}: {detail}")
-                    failures += 1
-                    if failures >= int(self.cfg.get("max_consecutive_failures", 3)):
-                        self.store.set_status(cid, "paused", f"Paused after {failures} failures in a row.")
-                        self.store.event(cid, f"Paused after {failures} failures in a row.")
+            while True:
+                with self.lock:
+                    running = self.store.q("SELECT * FROM campaigns WHERE status='running' ORDER BY id")
+                    if not running or self.quit:
+                        self.alive = False
                         return
-                if not self.store.has_ready(cid):
-                    continue
-                # "batch" messages go out back to back; the delay comes after
-                # the round, not after each message.
-                in_round += 1
-                if in_round < max(1, int(c["batch"])):
-                    continue
-                in_round = 0
-                self._nap(self._delay(c), stop, cid)
+                worked = False
+                for c in running:
+                    try:
+                        worked = self._step(c) or worked
+                    except Exception as error:  # noqa: BLE001 — one campaign must not take the rest down
+                        self.store.set_status(c["id"], "paused", f"Paused: internal error ({type(error).__name__}: {error}).")
+                        self.store.event(c["id"], f"Internal error: {type(error).__name__}: {error}")
+                if not worked:
+                    self.sleep(self.IDLE)
         finally:
-            self.next_at = None
+            self.alive = False
             self.wake(False)
+
+    def _step(self, c):
+        """Do at most one thing for one campaign. True if something was sent or settled."""
+        cid = c["id"]
+        pause = self.pauses.get(cid)
+        if pause and self.clock() < pause[0] + self._ceiling(c, pause[1]):
+            return False
+        self.pauses.pop(cid, None)
+        wait, why = self._hold(c)
+        if wait > 0:
+            self.store.set_note(cid, why)
+            return False
+
+        r = self.store.claim_next(cid)
+        if r is None:
+            self.in_round.pop(cid, None)
+            if c["kind"] == "ongoing":
+                self.store.set_note(cid, "On: waiting for new recipients.")
+                return False
+            self.store.set_status(cid, "done")
+            self.store.event(cid, "Finished: nobody left to send to.")
+            return True
+        self.store.set_note(cid, "")
+
+        vals = template.values(r["name"], json.loads(r["fields"]), c["first_name_only"])
+        text = template.render(c["template"], vals)
+        outcome, detail = self.send(r["phone"], text)
+        if outcome in ("sent", "dry"):
+            # A rehearsal must not put anyone in the history: the real
+            # run would then skip them all as "already texted".
+            self.store.mark_sent(r, text, detail, log=outcome == "sent")
+            self.failures[cid] = 0
+        elif outcome == "uncertain":
+            self.store.mark(r["id"], "uncertain", detail)
+            self.store.set_status(cid, "paused", "Paused: one message may or may not have been sent.")
+            self.store.event(cid, f"Uncertain result for {r['phone']}; paused.")
+            return True
+        else:
+            self.store.mark(r["id"], "failed", detail)
+            self.store.event(cid, f"Failed for {r['phone']}: {detail}")
+            self.failures[cid] = self.failures.get(cid, 0) + 1
+            if self.failures[cid] >= int(self.cfg.get("max_consecutive_failures", 3)):
+                note = f"Paused after {self.failures[cid]} failures in a row."
+                self.store.set_status(cid, "paused", note)
+                self.store.event(cid, note)
+                return True
+
+        # "batch" messages go out back to back; the delay comes after the
+        # round, not after each message. A fixed campaign that just emptied
+        # its queue skips the delay and finishes on the next pass; an ongoing
+        # one keeps it, so the next person added still waits their turn.
+        if c["kind"] != "ongoing" and not self.store.has_ready(cid):
+            return True
+        self.in_round[cid] = self.in_round.get(cid, 0) + 1
+        if self.in_round[cid] >= max(1, int(c["batch"])):
+            self.in_round[cid] = 0
+            self.pauses[cid] = (self.clock(), self._delay(c))
+        return True
 
     def _delay(self, c):
         jitter = max(0.0, float(c["jitter"]))
         return max(1.0, float(c["delay"]) + random.uniform(-jitter, jitter))
 
-    def _nap(self, seconds, stop, cid=None):
-        """Sleep in short steps so pause is immediate; a shorter delay set meanwhile applies."""
-        started = time.monotonic()
-        self.next_at = time.time() + seconds
-        while not stop.is_set():
-            left = seconds - (time.monotonic() - started)
-            if cid is not None:
-                c = self.store.campaign(cid)
-                if c is None or c["status"] != "running":
-                    break
-                ceiling = float(c["delay"]) + max(0.0, float(c["jitter"]))
-                if ceiling < seconds:
-                    seconds = max(1.0, ceiling)
-                    self.next_at = time.time() + max(0.0, seconds - (time.monotonic() - started))
-                    continue
-            if left <= 0:
-                break
-            self.sleep(min(0.5, left))
-        self.next_at = None
+    @staticmethod
+    def _ceiling(c, seconds):
+        """A delay shortened on the page applies to the wait already under way."""
+        return min(seconds, max(1.0, float(c["delay"]) + max(0.0, float(c["jitter"]))))
 
     def _hold(self, c):
         """(seconds to wait, why) — a start time in the future, or outside the allowed hours."""

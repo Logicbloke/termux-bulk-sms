@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     delay REAL NOT NULL DEFAULT 20,
     jitter REAL NOT NULL DEFAULT 0,
     batch INTEGER NOT NULL DEFAULT 1,
+    kind TEXT NOT NULL DEFAULT 'fixed',
     start_at TEXT NOT NULL DEFAULT '',
     window_start TEXT NOT NULL DEFAULT '',
     window_end TEXT NOT NULL DEFAULT '',
@@ -97,6 +98,8 @@ class Store:
         have = {r["name"] for r in self.db.execute("PRAGMA table_info(campaigns)")}
         if "batch" not in have:
             self.db.execute("ALTER TABLE campaigns ADD COLUMN batch INTEGER NOT NULL DEFAULT 1")
+        if "kind" not in have:
+            self.db.execute("ALTER TABLE campaigns ADD COLUMN kind TEXT NOT NULL DEFAULT 'fixed'")
         self._depth = 0
 
     # -- plumbing ----------------------------------------------------------
@@ -179,10 +182,10 @@ class Store:
     def create_campaign(self, data):
         with self.tx():
             cur = self.x(
-                "INSERT INTO campaigns (name, template, delay, jitter, batch, start_at, window_start, window_end,"
-                " first_name_only, allow_repeat, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO campaigns (name, template, delay, jitter, batch, kind, start_at, window_start,"
+                " window_end, first_name_only, allow_repeat, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (data["name"], data["template"], data["delay"], data["jitter"], int(data.get("batch", 1)),
-                 data["start_at"],
+                 data.get("kind", "fixed"), data["start_at"],
                  data["window_start"], data["window_end"], int(data["first_name_only"]),
                  int(data["allow_repeat"]), time.time()))
             return cur.lastrowid

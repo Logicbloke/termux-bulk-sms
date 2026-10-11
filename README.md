@@ -5,6 +5,9 @@ Send a personalised SMS to a list of people from your own Android phone, through
 
 - Paste a CSV, write a message with `[name]`, set the delay, press Start, watch it go.
 - Sendings are **campaigns**: every recipient can be edited, removed or put on the block list.
+- Two types: **Fixed** (a list sent through once) and **Ongoing** (stays on until you turn it off;
+  whoever you add is texted automatically). Several campaigns can be on at once — messages still
+  leave the phone one at a time.
 - Nobody is texted twice: duplicates in the paste, everyone ever texted (history) and a manual
   block list are all skipped.
 - Optional **remote lookup**: before sending, ask your own backend which numbers it already
@@ -81,6 +84,9 @@ the app or the phone dies in between, the row comes back as **Uncertain** and th
 **Paused**; nothing resumes by itself and you settle the row by hand ("It was sent" / "It was not").
 The history is kept when a campaign is deleted.
 
+After a restart of the app nothing is on: a fixed campaign waits for Resume and an ongoing one for
+Turn on.
+
 "Sent" means Android accepted the message from Termux. Delivery reports are not available through
 Termux:API.
 
@@ -105,7 +111,8 @@ empty is held back until you fix it. Placeholders that match nothing are flagged
   short time (historically 30 per 30 minutes; it varies by version and vendor), and that dialog
   stalls an unattended run. Watch the first larger campaign. The limit can be raised over adb:
   `adb shell settings put global sms_outgoing_check_max_count 500`.
-- **Battery.** A wake lock is held while a campaign runs. Also exempt Termux and Termux:API from
+- **Battery.** A wake lock is held while a campaign runs — for an ongoing campaign, for as long as
+  it is on. Also exempt Termux and Termux:API from
   battery optimisation, or Android may suspend them with the screen off.
 - **The law.** In most countries unsolicited marketing texts to private persons need prior consent,
   and every message must say who it is from and how to decline. The page reminds you when the
