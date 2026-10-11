@@ -4,8 +4,8 @@ import time
 import tempfile
 import unittest
 
-from bulksms.sender import Sender
-from bulksms.store import Store
+from termux_bulk_sms.sender import Sender
+from termux_bulk_sms.store import Store
 
 NOON = lambda: datetime.datetime(2026, 1, 15, 12, 0)  # noqa: E731
 

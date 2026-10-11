@@ -19,25 +19,39 @@ It is one process on the phone. The page is served only to the local network and
 ## Install (in Termux)
 
 ```sh
-pkg install python git termux-api termux-services   # plus the Termux:API app, with SMS permission
-git clone <this repo> && cd termux-bulk-sms
-cp config.example.json config.json                   # then edit it — see below
-python -m bulksms set-password
-python -m bulksms run                                # prints the address to open
+pkg install python termux-api termux-services      # plus the Termux:API app, with SMS permission
+pip install termux-bulk-sms
+termux-bulk-sms init                                 # writes the config file and says where
+termux-bulk-sms set-password
+termux-bulk-sms run                                  # prints the address to open
 ```
 
-Restart Termux once after installing `termux-services`.
+Restart Termux once after installing `termux-services`. Edit the config file (`init` prints its
+path, normally `~/.config/termux-bulk-sms/config.json`) before the first real run — see below.
 
 ### As a service you can switch on and off
 
 ```sh
-./service.sh install     # once
-./service.sh enable      # on: now and whenever Termux starts
-./service.sh disable     # off: nothing is listening
-./service.sh status | restart | logs
+termux-bulk-sms service install     # once
+termux-bulk-sms service enable      # on: now and whenever Termux starts
+termux-bulk-sms service disable     # off: nothing is listening
+termux-bulk-sms service status | restart | logs
 ```
 
-`config.json` is read at start, so `./service.sh restart` after editing it.
+The config file is read at start, so `termux-bulk-sms service restart` after editing it.
+
+### From a git checkout instead
+
+```sh
+git clone https://github.com/Logicbloke/termux-bulk-sms && cd termux-bulk-sms
+cp config.example.json config.json
+python -m termux_bulk_sms set-password
+python -m termux_bulk_sms run
+./service.sh install && ./service.sh enable
+```
+
+A `config.json` in the directory you run from is used when there is one; `BULKSMS_CONFIG` overrides
+both locations.
 
 ## config.json
 
@@ -57,7 +71,7 @@ Restart Termux once after installing `termux-services`.
 | `max_consecutive_failures` | `3` | A campaign pauses itself after this many failures in a row. |
 | `host`, `data_dir` | `0.0.0.0`, `data` | Listen address; where the SQLite file lives. |
 
-`password_hash` is written by `set-password`. `config.json` and `data/` are git-ignored.
+`password_hash` is written by `set-password`. The SQLite file lives in `data/` next to the config file.
 
 ## The remote lookup
 
@@ -107,7 +121,7 @@ empty is held back until you fix it. Placeholders that match nothing are flagged
   arriving over mobile data gets 403.
 - Password login (PBKDF2), throttled; the session cookie is `HttpOnly; SameSite=Strict`.
 - The page is plain **HTTP**: anyone who can sniff your Wi-Fi can read it. Use it on a network you
-  trust, and `./service.sh disable` when you are done.
+  trust, and `termux-bulk-sms service disable` when you are done.
 
 ## Good to know
 
@@ -123,8 +137,21 @@ empty is held back until you fix it. Placeholders that match nothing are flagged
   message has no "stop" wording; the block list is where a "stop" reply belongs. Your carrier's
   terms may also limit bulk sending from a consumer subscription.
 
+## Releasing
+
+1. Bump `__version__` in `termux_bulk_sms/__init__.py`, commit, push.
+2. Publish a GitHub release with the tag `v<version>`. The `publish` workflow runs the tests,
+   builds and uploads to PyPI.
+
+One-time setup on pypi.org: *Your account → Publishing → Add a pending publisher* with owner
+`Logicbloke`, repository `termux-bulk-sms`, workflow `publish.yml`, environment `pypi`.
+
 ## Tests
 
 ```sh
 python -m unittest discover -s tests
 ```
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).

@@ -1,3 +1,2 @@
-"""Bulk SMS from an Android phone through Termux:API, driven from a LAN web page."""
-
-__version__ = "0.1.0"
+"""Old name of the package, kept so `python -m bulksms` and services installed
+before the rename keep working from a git checkout. Not part of the PyPI package."""

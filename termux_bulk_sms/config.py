@@ -31,7 +31,16 @@ _ITERATIONS = 400_000
 
 
 def path():
-    return os.environ.get("BULKSMS_CONFIG") or os.path.join(os.getcwd(), "config.json")
+    """$BULKSMS_CONFIG, else ./config.json when there is one (a git checkout),
+    else the per-user file an installed package uses."""
+    given = os.environ.get("BULKSMS_CONFIG")
+    if given:
+        return os.path.abspath(given)
+    local = os.path.join(os.getcwd(), "config.json")
+    if os.path.exists(local):
+        return local
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "termux-bulk-sms", "config.json")
 
 
 def load(file=None):
@@ -62,6 +71,7 @@ def save_value(key, value, file=None):
         with open(file, encoding="utf-8") as fh:
             data = json.load(fh)
     data[key] = value
+    os.makedirs(os.path.dirname(os.path.abspath(file)), exist_ok=True)
     tmp = file + ".tmp"
     with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)

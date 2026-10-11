@@ -1,8 +1,8 @@
 import unittest
 
-from bulksms import csvin, template
-from bulksms.phone import to_e164
-from bulksms.server import is_local
+from termux_bulk_sms import csvin, template
+from termux_bulk_sms.phone import to_e164
+from termux_bulk_sms.server import is_local
 
 
 class PhoneTest(unittest.TestCase):

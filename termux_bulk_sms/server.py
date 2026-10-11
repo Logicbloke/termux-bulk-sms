@@ -285,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/login" and method == "POST":
             if not cfg["password_hash"]:
-                raise ApiError(503, "No password is set. Run: python -m bulksms set-password")
+                raise ApiError(503, "No password is set. Run: termux-bulk-sms set-password")
             wait = app.locked_for(ip)
             if wait:
                 raise ApiError(429, f"Too many attempts. Try again in {wait} s.")
@@ -472,10 +472,10 @@ def serve(cfg):
     handler = type("BoundHandler", (Handler,), {"app": app})
     httpd = ThreadingHTTPServer((cfg["host"], int(cfg["port"])), handler)
     httpd.daemon_threads = True
-    print(f"bulksms listening on {cfg['host']}:{cfg['port']}"
+    print(f"termux-bulk-sms listening on {cfg['host']}:{cfg['port']}"
           + ("  (DRY RUN: nothing is really sent)" if cfg["dry_run"] else ""), flush=True)
     if not cfg["password_hash"]:
-        print("No password is set — nobody can log in. Run: python -m bulksms set-password", flush=True)
+        print("No password is set — nobody can log in. Run: termux-bulk-sms set-password", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
