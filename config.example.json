@@ -1,0 +1,19 @@
+{
+  "title": "Bulk SMS",
+  "port": 8742,
+  "dry_run": true,
+
+  "lookup": {
+    "url": "",
+    "token": "",
+    "label": "our database"
+  },
+
+  "country_code": "46",
+  "default_delay": 20,
+  "default_jitter": 5,
+  "window_start": "08:00",
+  "window_end": "21:00",
+  "sim_slot": null,
+  "max_consecutive_failures": 3
+}
