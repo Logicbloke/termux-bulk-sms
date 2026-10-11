@@ -99,6 +99,7 @@ class App:
         running = self.sender.running_id() == cid
         return {
             "campaign": c,
+            "dry_run": bool(self.cfg["dry_run"]),
             "counts": counts,
             "recipients": rows,
             "total": total,

@@ -47,6 +47,7 @@ async function api(path, body) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== "/login") { showLogin(); throw new Error(data.error || "Log in first."); }
   if (!res.ok) throw new Error(data.error || "Something went wrong (" + res.status + ").");
+  if (typeof data.dry_run === "boolean") showMode(data.dry_run);
   return data;
 }
 
@@ -394,14 +395,21 @@ async function route() {
   } catch (e) { if (!/Log in/.test(e.message)) { fail(e); } }
 }
 
+// The mode belongs to the server and changes when it is restarted, so the
+// banner follows every answer — not only the one the page was loaded with.
+function showMode(dry) {
+  if (state) state.dry_run = dry;
+  const banner = document.getElementById("banner");
+  banner.hidden = !dry;
+  banner.textContent = "Dry run: nothing is really sent. Set \"dry_run\": false in config.json and restart to send.";
+}
+
 async function boot() {
   try { state = await api("/state"); } catch (e) { return; }
   document.title = state.title;
   document.getElementById("brand").textContent = state.title;
   document.getElementById("nav").hidden = false;
-  const banner = document.getElementById("banner");
-  banner.hidden = !state.dry_run;
-  banner.textContent = "Dry run: nothing is really sent. Set \"dry_run\": false in config.json to send.";
+  showMode(state.dry_run);
   route();
 }
 

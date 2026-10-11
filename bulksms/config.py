@@ -44,6 +44,9 @@ def load(file=None):
                 cfg[key].update(value)
             else:
                 cfg[key] = value
+    # "dry_run": "false" is a non-empty string, and so would count as true.
+    if not isinstance(cfg["dry_run"], bool):
+        raise SystemExit(f'{file}: "dry_run" must be true or false, without quotes.')
     cfg["_file"] = file
     if not os.path.isabs(cfg["data_dir"]):
         cfg["data_dir"] = os.path.join(os.path.dirname(os.path.abspath(file)), cfg["data_dir"])
