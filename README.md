@@ -74,8 +74,12 @@ numbers=%2B46701234567%0A%2B46735556677        (one E.164 number per line)
 ```
 
 With a lookup configured, a row is sendable only after the lookup has answered `unknown` for the
-number it has *now*. Numbers are asked again every time you press Start, and **if the lookup cannot
-be reached the campaign does not start** — it never falls back to "probably fine".
+number it has *now*. The lookup is asked when a number is added or edited, when you press "Check
+numbers again", and once more when a campaign is started — never before each message.
+
+The phone does not need a data connection to send. If the lookup cannot be reached, numbers that
+were already checked keep their answer and are sent; numbers added while offline stay "Not checked"
+and are **not** sent until a check succeeds. It never falls back to "probably fine".
 
 ## How it avoids sending twice
 

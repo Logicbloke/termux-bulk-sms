@@ -60,7 +60,7 @@ function toast(text, bad) {
 }
 const fail = (e) => toast(e.message, true);
 function after(result) {
-  if (result && result.lookup_problem) toast("Could not check the numbers: " + result.lookup_problem, true);
+  if (result && result.lookup_problem) toast("Could not check the numbers now (" + result.lookup_problem + "). Rows already checked keep their answer; unchecked rows are not sent.", true);
 }
 function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }
 function day(ts) { return new Date(ts * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" }); }

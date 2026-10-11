@@ -69,8 +69,13 @@ class App:
 
     # -- checking ----------------------------------------------------------
 
-    def check(self, cid, must=False):
-        """Classify a campaign, asking the lookup first. Returns an error text or ""."""
+    def check(self, cid):
+        """Classify a campaign, asking the lookup first. Returns an error text or "".
+
+        A lookup that cannot be reached changes nothing: rows it has already
+        answered for keep their answer, rows it has not stay "unchecked" and
+        are not sent.
+        """
         problem = ""
         if lookup.enabled(self.cfg):
             phones = self.store.phones_to_look_up(cid)
@@ -79,8 +84,6 @@ class App:
                     self.store.store_lookup(cid, lookup.check(self.cfg, phones))
             except lookup.LookupFailed as error:
                 problem = str(error)
-                if must:
-                    raise ApiError(502, f"Not started: {problem}.")
         self.store.classify(cid)
         return problem
 
@@ -367,10 +370,16 @@ class Handler(BaseHTTPRequestHandler):
             elif action == "start":
                 if running:
                     raise ApiError(409, "Already running.")
-                # Never start on an old answer: ask again, and refuse if nobody answers.
-                app.check(cid, must=True)
+                # Ask again when the lookup answers, but do not depend on it: the
+                # phone can send SMS without a data connection, and everyone who
+                # was checked when they were added is still checked.
+                problem = app.check(cid)
                 if c["kind"] == "fixed" and not store.has_ready(cid):
-                    raise ApiError(422, "Nobody is ready to be sent to.")
+                    raise ApiError(422, "Nobody is ready to be sent to."
+                                   + (f" The numbers could not be checked: {problem}." if problem else ""))
+                if problem:
+                    store.event(cid, "Started without a fresh check (no connection): using the answers from when"
+                                     " the numbers were added.")
                 app.sender.start(cid)
             elif action == "pause":
                 app.sender.pause(cid, "Stopped by you." if c["kind"] == "ongoing" else "Paused by you.")
