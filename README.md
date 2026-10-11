@@ -47,7 +47,8 @@ Restart Termux once after installing `termux-services`.
 | `lookup.token` | `""` | Sent as `Authorization: Bearer …`. |
 | `lookup.label` | `"our database"` | Shown as "Already in …" on skipped rows. |
 | `country_code` | `"46"` | Country that numbers starting with `0` belong to. |
-| `default_delay`, `default_jitter` | `20`, `5` | Seconds between messages, and a random ± on top. Per campaign on the page. |
+| `default_delay`, `default_jitter` | `20`, `5` | Seconds to wait between rounds, and a random ± on top. Per campaign on the page. |
+| `default_batch` | `1` | Messages per round: that many go out back to back, then the delay. Per campaign on the page. |
 | `window_start`, `window_end` | `08:00`, `21:00` | Default allowed hours (the phone's clock). Empty = any time. |
 | `sim_slot` | `null` | SIM slot for dual-SIM phones (`0` or `1`). |
 | `max_consecutive_failures` | `3` | A campaign pauses itself after this many failures in a row. |

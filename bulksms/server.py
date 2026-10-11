@@ -137,6 +137,11 @@ class App:
                 out[key] = value[:limit]
         number("delay", 1, 3600, float(self.cfg["default_delay"]))
         number("jitter", 0, 600, float(self.cfg["default_jitter"]))
+        number("batch", 1, 100, float(self.cfg["default_batch"]))
+        if "batch" in out:
+            if out["batch"] != int(out["batch"]):
+                raise ApiError(422, "batch must be a whole number.")
+            out["batch"] = int(out["batch"])
         for key, default in (("window_start", self.cfg["window_start"]), ("window_end", self.cfg["window_end"])):
             if key in body or not partial:
                 value = str(body.get(key, default) or "").strip()
@@ -307,6 +312,7 @@ class Handler(BaseHTTPRequestHandler):
                 "dry_run": bool(cfg["dry_run"]),
                 "lookup": {"enabled": lookup.enabled(cfg), "label": cfg["lookup"]["label"]},
                 "defaults": {"delay": cfg["default_delay"], "jitter": cfg["default_jitter"],
+                             "batch": cfg["default_batch"],
                              "window_start": cfg["window_start"], "window_end": cfg["window_end"]},
                 "running_id": app.sender.running_id(),
                 "campaigns": store.campaigns(),

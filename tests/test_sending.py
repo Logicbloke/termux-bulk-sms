@@ -108,6 +108,17 @@ class SendingTest(unittest.TestCase):
         self.store.recover()
         self.assertEqual(self.statuses(cid), ["sent", "sent"])
 
+    def test_a_round_sends_several_and_then_waits(self):
+        cid = self.campaign([(str(i), f"070000000{i}") for i in range(1, 8)], batch=3)
+        self.answer(cid)
+        trace = []
+        s = self.sender(send=lambda phone, text: (trace.append("sms"), ("sent", ""))[1])
+        s._nap = lambda seconds, stop, cid=None: trace.append("wait")
+        s.start(cid)
+        s.join(10)
+        self.assertEqual(trace, ["sms"] * 3 + ["wait"] + ["sms"] * 3 + ["wait"] + ["sms"])
+        self.assertEqual(self.store.campaign(cid)["status"], "done")
+
     def test_a_dry_run_leaves_no_history(self):
         cid = self.campaign([("Anna", "0700000001")])
         self.answer(cid)

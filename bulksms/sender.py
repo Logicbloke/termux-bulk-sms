@@ -90,6 +90,7 @@ class Sender:
     def _run(self, cid, stop):
         self.wake(True)
         failures = 0
+        in_round = 0
         try:
             while not stop.is_set():
                 c = self.store.campaign(cid)
@@ -129,6 +130,12 @@ class Sender:
                         return
                 if not self.store.has_ready(cid):
                     continue
+                # "batch" messages go out back to back; the delay comes after
+                # the round, not after each message.
+                in_round += 1
+                if in_round < max(1, int(c["batch"])):
+                    continue
+                in_round = 0
                 self._nap(self._delay(c), stop, cid)
         finally:
             self.next_at = None

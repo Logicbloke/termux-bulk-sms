@@ -135,6 +135,7 @@ function campaignForm() {
     csv: h("textarea", { class: "mono", required: true, placeholder: "name;phone\nAnna Andersson;070-123 45 67\nBo Berg;+46 73 555 66 77" }),
     template: h("textarea", { required: true, maxlength: 2000, placeholder: "Hi [name]! …" }),
     delay: h("input", { type: "text", inputmode: "decimal", value: d.delay }),
+    batch: h("input", { type: "text", inputmode: "numeric", value: d.batch }),
     jitter: h("input", { type: "text", inputmode: "decimal", value: d.jitter }),
     window_start: h("input", { type: "time", value: d.window_start }),
     window_end: h("input", { type: "time", value: d.window_end }),
@@ -154,7 +155,7 @@ function campaignForm() {
     field("Message", f.template, "[name] is replaced for each recipient."),
     counter(f.template),
     h("div", { class: "row" },
-      field("Seconds between messages", f.delay),
+      field("Delay (seconds)", f.delay), field("Messages per round", f.batch),
       field("Random ± seconds", f.jitter),
       field("Not before", f.window_start),
       field("Not after", f.window_end),
@@ -162,7 +163,8 @@ function campaignForm() {
     h("label", { class: "check" }, f.first_name_only, "Use only the first name for [name]"),
     h("label", { class: "check" }, f.allow_repeat, "Allow numbers I have texted before"),
     h("div", { class: "actions" }, h("button", { class: "primary" }, "Create and check"),
-      h("span", { class: "muted small" }, "Nothing is sent until you press Start.")));
+      h("span", { class: "muted small" }, "Nothing is sent until you press Start.")),
+    h("p", { class: "muted small" }, "A round sends that many messages back to back, then waits the delay."));
 }
 
 async function showList() {
@@ -205,6 +207,7 @@ function buildCampaign(d) {
   const f = view.form = {
     template: h("textarea", { maxlength: 2000 }),
     delay: h("input", { type: "text", inputmode: "decimal" }),
+    batch: h("input", { type: "text", inputmode: "numeric" }),
     jitter: h("input", { type: "text", inputmode: "decimal" }),
     window_start: h("input", { type: "time" }),
     window_end: h("input", { type: "time" }),
@@ -236,7 +239,7 @@ function buildCampaign(d) {
       counter(f.template, () => view.sampleName),
       e.preview,
       h("div", { class: "row" },
-        field("Seconds between messages", f.delay), field("Random ± seconds", f.jitter),
+        field("Delay (seconds)", f.delay), field("Messages per round", f.batch), field("Random ± seconds", f.jitter),
         field("Not before", f.window_start), field("Not after", f.window_end),
         field("Start at (optional)", f.start_at)),
       h("label", { class: "check" }, f.first_name_only, "Use only the first name for [name]"),
@@ -258,7 +261,7 @@ function renderLive(d) {
   e.title.textContent = c.name;
   view.form.template.disabled = d.running;
 
-  const eta = left && c.status === "running" ? "about " + Math.ceil(left * c.delay / 60) + " min left" : "";
+  const eta = left && c.status === "running" ? "about " + Math.ceil(Math.ceil(left / Math.max(1, c.batch)) * c.delay / 60) + " min left" : "";
   const next = d.next_at && c.status === "running" ? "next in " + Math.max(0, Math.round(d.next_at - Date.now() / 1000)) + " s" : "";
   put(e.status, 
     h("span", { class: "badge " + (c.status === "running" ? "ok" : c.status === "paused" ? "warn" : "") }, CAMPAIGN[c.status] || c.status),

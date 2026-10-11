@@ -19,6 +19,7 @@ DEFAULTS = {
     "country_code": "46",
     "default_delay": 20,
     "default_jitter": 5,
+    "default_batch": 1,
     "window_start": "08:00",
     "window_end": "21:00",
     "sim_slot": None,

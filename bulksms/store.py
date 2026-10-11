@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     template TEXT NOT NULL DEFAULT '',
     delay REAL NOT NULL DEFAULT 20,
     jitter REAL NOT NULL DEFAULT 0,
+    batch INTEGER NOT NULL DEFAULT 1,
     start_at TEXT NOT NULL DEFAULT '',
     window_start TEXT NOT NULL DEFAULT '',
     window_end TEXT NOT NULL DEFAULT '',
@@ -77,7 +78,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 # dry-run mode, and handed back to the queue the moment it is started live.
 SETTLED = ("sent", "dry", "sending", "uncertain", "failed")
 
-CAMPAIGN_FIELDS = ("name", "template", "delay", "jitter", "start_at", "window_start",
+CAMPAIGN_FIELDS = ("name", "template", "delay", "jitter", "batch", "start_at", "window_start",
                    "window_end", "first_name_only", "allow_repeat")
 
 
@@ -92,6 +93,10 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        # Databases created before a column existed.
+        have = {r["name"] for r in self.db.execute("PRAGMA table_info(campaigns)")}
+        if "batch" not in have:
+            self.db.execute("ALTER TABLE campaigns ADD COLUMN batch INTEGER NOT NULL DEFAULT 1")
         self._depth = 0
 
     # -- plumbing ----------------------------------------------------------
@@ -174,9 +179,10 @@ class Store:
     def create_campaign(self, data):
         with self.tx():
             cur = self.x(
-                "INSERT INTO campaigns (name, template, delay, jitter, start_at, window_start, window_end,"
-                " first_name_only, allow_repeat, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (data["name"], data["template"], data["delay"], data["jitter"], data["start_at"],
+                "INSERT INTO campaigns (name, template, delay, jitter, batch, start_at, window_start, window_end,"
+                " first_name_only, allow_repeat, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (data["name"], data["template"], data["delay"], data["jitter"], int(data.get("batch", 1)),
+                 data["start_at"],
                  data["window_start"], data["window_end"], int(data["first_name_only"]),
                  int(data["allow_repeat"]), time.time()))
             return cur.lastrowid
