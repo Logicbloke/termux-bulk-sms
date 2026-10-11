@@ -32,6 +32,13 @@ input[type=text], input[type=password], input[type=time], input[type=datetime-lo
 textarea { min-height: 120px; resize: vertical; }
 textarea.mono { font-family: ui-monospace, monospace; font-size: 14px; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
+/* The allowed hours and the start date belong together: one row. Below 480px
+   the date picker no longer fits beside two clocks and takes the next line. */
+.row.times { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr); }
+@media (max-width: 480px) {
+  .row.times { grid-template-columns: 1fr 1fr; }
+  .row.times > :last-child { grid-column: 1 / -1; }
+}
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
 button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); cursor: pointer; }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
