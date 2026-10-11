@@ -33,7 +33,7 @@ PAGE = 100
 
 FILTERS = {
     "todo": ("ready", "sending"),
-    "sent": ("sent",),
+    "sent": ("sent", "dry"),
     "problem": ("failed", "uncertain", "invalid", "incomplete", "unchecked"),
     "skipped": ("known", "blocked", "texted", "duplicate"),
 }
@@ -61,7 +61,7 @@ class App:
         self.cfg = cfg
         os.makedirs(cfg["data_dir"], exist_ok=True)
         self.store = Store(os.path.join(cfg["data_dir"], "bulksms.sqlite3"),
-                           cfg["country_code"], lookup.enabled(cfg))
+                           cfg["country_code"], lookup.enabled(cfg), bool(cfg["dry_run"]))
         self.store.recover()
         self.sender = Sender(self.store, cfg, send=send)
         self.fails = {}
@@ -395,13 +395,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(409, "This one is being sent right now.")
             problem = ""
             if action is None:
-                if r["status"] == "sent":
+                if r["status"] in ("sent", "dry"):
                     raise ApiError(409, "Already sent; it cannot be edited.")
                 store.edit_recipient(rid, str(body.get("name", "")).strip()[:120],
                                      str(body.get("phone", "")).strip()[:40])
                 problem = app.check(cid)
             elif action == "delete":
-                if r["status"] == "sent":
+                if r["status"] in ("sent", "dry"):
                     raise ApiError(409, "Already sent; the row is kept as the record of it.")
                 store.delete_recipient(rid)
                 store.classify(cid)

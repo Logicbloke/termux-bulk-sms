@@ -7,7 +7,7 @@ let timer = null;       // polling the open campaign
 let view = {};          // what the open campaign view remembers between polls
 
 const LABELS = {
-  ready: ["Ready", "ok"], sending: ["Sending…", "warn"], sent: ["Sent", "ok"],
+  ready: ["Ready", "ok"], sending: ["Sending…", "warn"], sent: ["Sent", "ok"], dry: ["Rehearsed, not sent", "warn"],
   failed: ["Failed", "bad"], uncertain: ["Uncertain", "bad"], invalid: ["Invalid number", "bad"],
   incomplete: ["Missing value", "warn"], unchecked: ["Not checked", "warn"],
   known: ["Already known", ""], blocked: ["Blocked", ""], texted: ["Already texted", ""],
@@ -126,7 +126,7 @@ async function showList() {
     return h("li", {},
       h("a", { class: "grow", href: "#/c/" + c.id }, c.name),
       h("span", { class: "badge " + (c.status === "running" ? "ok" : "") }, CAMPAIGN[c.status] || c.status),
-      h("span", { class: "muted small" }, (n.sent || 0) + " sent of " + total));
+      h("span", { class: "muted small" }, (n.sent || 0) + " sent of " + total + (n.dry ? " (" + n.dry + " rehearsed)" : "")));
   });
   put(main, 
     h("h1", {}, "Campaigns"),
@@ -207,7 +207,7 @@ function buildCampaign(d) {
 
 function renderLive(d) {
   const c = d.campaign, n = d.counts, e = view.el, base = "/campaigns/" + view.id;
-  const sent = n.sent || 0, left = (n.ready || 0) + (n.sending || 0);
+  const sent = (n.sent || 0) + (n.dry || 0), left = (n.ready || 0) + (n.sending || 0);
   e.title.textContent = c.name;
   view.form.template.disabled = d.running;
 
@@ -215,7 +215,7 @@ function renderLive(d) {
   const next = d.next_at && c.status === "running" ? "next in " + Math.max(0, Math.round(d.next_at - Date.now() / 1000)) + " s" : "";
   put(e.status, 
     h("span", { class: "badge " + (c.status === "running" ? "ok" : c.status === "paused" ? "warn" : "") }, CAMPAIGN[c.status] || c.status),
-    h("strong", {}, sent + " sent, " + left + " to go"),
+    h("strong", {}, sent + (n.dry ? " rehearsed, " : " sent, ") + left + " to go"),
     h("span", { class: "muted small" }, [c.note, eta, next].filter(Boolean).join(" · ")));
   e.bar.max = Math.max(1, sent + left); e.bar.value = sent;
 
@@ -261,7 +261,7 @@ function recipientTable(d) {
   if (!d.recipients.length) return h("p", { class: "muted" }, "Nothing here.");
   const rows = d.recipients.map((r) => {
     const base = "/recipients/" + r.id;
-    const locked = r.status === "sent" || r.status === "sending";
+    const locked = r.status === "sent" || r.status === "dry" || r.status === "sending";
     const buttons = [];
     if (r.status === "uncertain") {
       buttons.push(h("button", { type: "button", class: "mini", onclick: () => act(base + "/resolve", { sent: true }) }, "It was sent"),

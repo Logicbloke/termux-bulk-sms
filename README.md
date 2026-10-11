@@ -42,7 +42,7 @@ Restart Termux once after installing `termux-services`.
 | --- | --- | --- |
 | `title` | `"Bulk SMS"` | Name shown on the page. |
 | `port` | `8742` | Port the page is served on. |
-| `dry_run` | `true` | **Nothing is sent while this is true.** A rehearsal: rows are marked sent, the history is left alone. |
+| `dry_run` | `true` | **Nothing is sent while this is true.** A rehearsal: rows are marked "Rehearsed", the history is left alone, and when the app is restarted with `false` those rows go back in the queue. |
 | `lookup.url` | `""` | Remote lookup endpoint. Empty = no lookup. Must be `https://`. |
 | `lookup.token` | `""` | Sent as `Authorization: Bearer …`. |
 | `lookup.label` | `"our database"` | Shown as "Already in …" on skipped rows. |

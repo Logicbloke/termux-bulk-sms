@@ -73,14 +73,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 """
 
 # Statuses the classifier never touches: something already happened to the row.
-SETTLED = ("sent", "sending", "uncertain", "failed")
+# "dry" is a row a rehearsal went through: settled for as long as the app is in
+# dry-run mode, and handed back to the queue the moment it is started live.
+SETTLED = ("sent", "dry", "sending", "uncertain", "failed")
 
 CAMPAIGN_FIELDS = ("name", "template", "delay", "jitter", "start_at", "window_start",
                    "window_end", "first_name_only", "allow_repeat")
 
 
 class Store:
-    def __init__(self, file, country_code="46", lookup_enabled=False):
+    def __init__(self, file, country_code="46", lookup_enabled=False, dry_run=False):
+        self.dry_run = dry_run
         self.country_code = country_code
         self.lookup_enabled = lookup_enabled
         self.lock = threading.RLock()
@@ -139,6 +142,23 @@ class Store:
                 self.x("UPDATE campaigns SET status='paused', note=? WHERE id=?",
                        ("Paused: the app was restarted.", c["id"]))
                 self.event(c["id"], "The app was restarted; the campaign is paused.")
+            # Rows written by a version that recorded a rehearsal as "sent".
+            self.x("UPDATE recipients SET status='dry' WHERE status='sent' AND detail LIKE 'Dry run%'"
+                   " AND NOT EXISTS (SELECT 1 FROM sent_log s WHERE s.phone = recipients.phone"
+                   " AND s.campaign_id = recipients.campaign_id)")
+            if not self.dry_run:
+                self.release_rehearsed()
+
+    def release_rehearsed(self):
+        """Live mode: whatever a rehearsal "sent" is put back in the queue."""
+        with self.tx():
+            touched = self.q("SELECT DISTINCT campaign_id AS id FROM recipients WHERE status='dry'")
+            self.x("UPDATE recipients SET status='unchecked', detail='', sent_at=NULL WHERE status='dry'")
+            for c in touched:
+                self.classify(c["id"])
+                self.x("UPDATE campaigns SET status='paused', note=? WHERE id=? AND status IN ('done','paused')",
+                       ("The rehearsal is over: everyone it covered is back in the queue.", c["id"]))
+                self.event(c["id"], "Now live: the rows from the dry run are back in the queue.")
 
     # -- campaigns ---------------------------------------------------------
 
@@ -215,18 +235,18 @@ class Store:
 
     def edit_recipient(self, rid, name, phone_raw):
         self.x("UPDATE recipients SET name=?, phone_raw=?, phone=?, status='unchecked', detail=''"
-               " WHERE id=? AND status NOT IN ('sent','sending')",
+               " WHERE id=? AND status NOT IN ('sent','dry','sending')",
                (name, phone_raw, to_e164(phone_raw, self.country_code), rid))
 
     def delete_recipient(self, rid):
-        self.x("DELETE FROM recipients WHERE id=? AND status NOT IN ('sent','sending')", (rid,))
+        self.x("DELETE FROM recipients WHERE id=? AND status NOT IN ('sent','dry','sending')", (rid,))
 
     def retry_failed(self, cid):
         self.x("UPDATE recipients SET status='unchecked', detail='' WHERE campaign_id=? AND status='failed'", (cid,))
 
     def phones_to_look_up(self, cid):
         rows = self.q("SELECT DISTINCT phone FROM recipients WHERE campaign_id=? AND phone IS NOT NULL"
-                      " AND status NOT IN ('sent','sending','uncertain','failed')", (cid,))
+                      " AND status NOT IN ('sent','dry','sending','uncertain','failed')", (cid,))
         return [r["phone"] for r in rows]
 
     def store_lookup(self, cid, answers):
@@ -317,7 +337,8 @@ class Store:
         with self.tx():
             now = time.time()
             c = self.campaign(r["campaign_id"]) or {"name": ""}
-            self.x("UPDATE recipients SET status='sent', detail=?, sent_at=? WHERE id=?", (detail, now, r["id"]))
+            self.x("UPDATE recipients SET status=?, detail=?, sent_at=? WHERE id=?",
+                   ("sent" if log else "dry", detail, now, r["id"]))
             if log:
                 self.x("INSERT INTO sent_log (phone, name, campaign_id, campaign_name, text, sent_at)"
                        " VALUES (?,?,?,?,?,?)", (r["phone"], r["name"], r["campaign_id"], c["name"], text, now))

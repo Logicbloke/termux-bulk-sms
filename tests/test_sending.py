@@ -13,7 +13,7 @@ class SendingTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.file = os.path.join(self.dir.name, "t.sqlite3")
-        self.store = Store(self.file, "46", lookup_enabled=True)
+        self.store = Store(self.file, "46", lookup_enabled=True, dry_run=True)
         self.sent = []
 
     def tearDown(self):
@@ -84,11 +84,35 @@ class SendingTest(unittest.TestCase):
         self.answer(again)
         self.assertEqual(self.statuses(again), ["texted"])
 
+    def test_going_live_puts_the_rehearsed_rows_back_in_the_queue(self):
+        cid = self.campaign([("Anna", "0700000001"), ("Bo", "0700000002")])
+        self.answer(cid)
+        self.run_to_end(cid, send=lambda phone, text: ("dry", "Dry run — nothing was sent."))
+        self.assertEqual(self.statuses(cid), ["dry", "dry"])
+        self.assertEqual(self.store.campaign(cid)["status"], "done")
+        # A row an older version recorded as "sent" during a rehearsal.
+        self.store.x("UPDATE recipients SET status='sent' WHERE position=1 AND campaign_id=?", (cid,))
+        # Restarted, still rehearsing: nothing moves.
+        self.store.recover()
+        self.assertEqual(self.statuses(cid), ["dry", "dry"])
+        # Restarted live.
+        self.store.db.close()
+        self.store = Store(self.file, "46", lookup_enabled=True, dry_run=False)
+        self.store.recover()
+        self.assertEqual(self.statuses(cid), ["ready", "ready"])
+        self.assertEqual(self.store.campaign(cid)["status"], "paused")
+        self.run_to_end(cid)
+        self.assertEqual([p for p, _ in self.sent], ["+46700000001", "+46700000002"])
+        self.assertEqual(self.statuses(cid), ["sent", "sent"])
+        # And a real "sent" is never released.
+        self.store.recover()
+        self.assertEqual(self.statuses(cid), ["sent", "sent"])
+
     def test_a_dry_run_leaves_no_history(self):
         cid = self.campaign([("Anna", "0700000001")])
         self.answer(cid)
         self.run_to_end(cid, send=lambda phone, text: ("dry", "Dry run"))
-        self.assertEqual(self.statuses(cid), ["sent"])
+        self.assertEqual(self.statuses(cid), ["dry"])
         real = self.campaign([("Anna", "0700000001")])
         self.answer(real)
         self.assertEqual(self.statuses(real), ["ready"])
