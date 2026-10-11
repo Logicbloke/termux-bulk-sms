@@ -62,6 +62,8 @@ td input[type=text] { padding: 6px; min-width: 110px; }
 .list li:last-child { border-bottom: 0; }
 .list .grow { flex: 1 1 200px; min-width: 0; }
 .tip { color: var(--warn); font-size: 14px; margin-top: 6px; }
+.counter { margin-top: 6px; }
+.counter .tip { margin: 0; }
 .err { color: var(--bad); font-weight: 600; }
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 8px; max-width: 90vw; z-index: 5; }
 .toast.bad { background: var(--bad); color: #fff; }

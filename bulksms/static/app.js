@@ -68,6 +68,50 @@ function statusLabel(s) {
 }
 function badge(s) { return h("span", { class: "badge " + ((LABELS[s] || ["", ""])[1]) }, statusLabel(s)); }
 
+// -- message length ----------------------------------------------------------
+// The same counting as template.py: GSM-7 packs 160 characters into one SMS (153
+// per part when split); one character outside it turns the whole message into
+// Unicode, 70 (67 per part).
+
+const GSM = new Set("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà");
+const GSM_EXT = new Set("^{}\\[~]|€");
+
+function segments(text) {
+  let units = 0, odd = null;
+  for (const ch of text) {
+    if (GSM.has(ch)) units += 1;
+    else if (GSM_EXT.has(ch)) units += 2;
+    else { odd = ch; break; }
+  }
+  if (odd === null) return { units, parts: units === 0 ? 0 : units <= 160 ? 1 : Math.ceil(units / 153), encoding: "GSM-7", odd };
+  units = text.length;  // UTF-16 code units, which is what Unicode SMS counts
+  return { units, parts: units <= 70 ? 1 : Math.ceil(units / 67), encoding: "Unicode", odd };
+}
+
+// A live line under a message box. [name] is counted as `name()` when one is
+// known, otherwise — like every other placeholder — as ten characters.
+function counter(textarea, name) {
+  const line = h("div", { class: "muted small counter" });
+  const update = () => {
+    let guessed = false;
+    const text = textarea.value.replace(/\[([^\[\]\n]{1,40})\]/g, (m, key) => {
+      const known = key.trim().toLowerCase() === "name" && name && name();
+      if (known) return known;
+      guessed = true; return "xxxxxxxxxx";
+    });
+    const s = segments(text);
+    const room = s.encoding === "GSM-7" ? (s.parts <= 1 ? 160 - s.units : s.parts * 153 - s.units) : (s.parts <= 1 ? 70 - s.units : s.parts * 67 - s.units);
+    put(line,
+      h("strong", {}, s.units + " characters, " + s.parts + " SMS"),
+      s.parts ? " · " + room + " left in this SMS" : "",
+      guessed ? " · placeholders counted as 10 characters" : "",
+      s.odd ? h("span", { class: "tip" }, " · “" + s.odd + "” is outside the SMS alphabet, so only 70 characters fit per SMS") : null);
+  };
+  textarea.addEventListener("input", update);
+  update();
+  return line;
+}
+
 // -- login -----------------------------------------------------------------
 
 function showLogin() {
@@ -107,6 +151,7 @@ function campaignForm() {
     field("Name of the campaign", f.name),
     field("Recipients (paste CSV)", f.csv, "A name and a phone number per row. Comma, semicolon or tab; a header row is optional. Other columns become placeholders, e.g. [town]."),
     field("Message", f.template, "[name] is replaced for each recipient."),
+    counter(f.template),
     h("div", { class: "row" },
       field("Seconds between messages", f.delay),
       field("Random ± seconds", f.jitter),
@@ -187,6 +232,7 @@ function buildCampaign(d) {
     } },
       h("h2", {}, "Message and pace"),
       field("Message", f.template),
+      counter(f.template, () => view.sampleName),
       e.preview,
       h("div", { class: "row" },
         field("Seconds between messages", f.delay), field("Random ± seconds", f.jitter),
@@ -236,9 +282,11 @@ function renderLive(d) {
     } }, "Delete campaign"));
 
   const p = d.preview;
+  const sample = c.first_name_only ? (p.to || "").trim().split(/\s+/)[0] : (p.to || "").trim();
+  if (sample !== view.sampleName) { view.sampleName = sample; view.form.template.dispatchEvent(new Event("input")); }
   const draft = view.form.template.value !== c.template;
   put(e.preview, 
-    h("div", { class: "muted small" }, "Preview" + (p.to ? " for " + p.to : "") + " — " + p.chars + " characters, " + p.parts + " SMS (" + p.encoding + ")" + (draft ? " — save to update" : "")),
+    h("div", { class: "muted small" }, "Preview" + (p.to ? " for " + p.to : "") + (draft ? " — the saved message; save to update" : "")),
     h("div", { class: "preview" }, p.text),
     d.unknown_placeholders.length ? h("div", { class: "tip" }, "Will be sent as written, not replaced: " + d.unknown_placeholders.map((k) => "[" + k + "]").join(", ") + ". Available: " + d.placeholders.map((k) => "[" + k + "]").join(", ")) : null,
     /stop/i.test(c.template) ? null : h("div", { class: "tip" }, "The message does not say who it is from or how to decline (e.g. “Reply STOP”). Add people who decline to the block list."));
